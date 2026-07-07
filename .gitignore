@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+*.xlsx
+# Source documents contain candidate personal data — never commit
+*.pdf
+*.docx
+viz_data.json
+*_out.html
+scratch_*
+_proto.py
+_*.txt
+timetable_format.html
