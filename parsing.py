@@ -42,6 +42,9 @@ def classify_pdf(text: str) -> str:
         return 'registers'
     if 'MASTER TIMETABLE' in text or 'GENERAL INSTRUCTIONS' in text or 'WRITTEN ASSESSMENT' in text:
         return 'master'
+    up = text.upper()
+    if 'CAPACITY' in up and 'ROOM' in up:
+        return 'rooms'
     return 'unknown'
 
 # ---------------- registers ----------------
@@ -178,17 +181,39 @@ def parse_master_table(pdf_bytes: bytes):
     return entries
 
 # ---------------- rooms ----------------
-def parse_rooms(docx_bytes: bytes):
+_ROOM_SKIP = {'ROOM', 'CAPACITY', 'S/NO', 'S/NO.', 'S/N', 'SNO', 'TOTAL', 'NO', 'NO.',
+              'ROOMS', 'VENUE', 'VENUES'}
+
+def parse_rooms(blob: bytes, filename: str = ''):
+    """Room list from either a Word doc or a PDF (table of ROOM | CAPACITY)."""
+    if filename.lower().endswith('.pdf') or blob[:5] == b'%PDF-':
+        return parse_rooms_pdf(pdf_bytes_to_text(blob))
+    return parse_rooms_docx(blob)
+
+def parse_rooms_docx(docx_bytes: bytes):
     doc = Document(io.BytesIO(docx_bytes))
     rooms = []
     for t in doc.tables:
         for row in t.rows:
             cells = [c.text.strip() for c in row.cells]
-            # find a name + integer capacity pair anywhere in the row
-            name = next((c for c in cells if c and not c.isdigit() and c.upper() not in ('ROOM',)), '')
+            name = next((c for c in cells if c and not c.isdigit()
+                         and c.upper() not in _ROOM_SKIP), '')
             cap = next((c for c in cells if c.isdigit()), '')
-            if name and cap and name.upper() != 'CAPACITY':
+            if name and cap:
                 rooms.append({'room': name, 'capacity': int(cap)})
+    return rooms
+
+def parse_rooms_pdf(text: str):
+    """Parse 'AMPHITHEATRE   60' style rows (optionally led by a serial number)."""
+    rooms = []
+    for line in text.splitlines():
+        m = re.match(r'^\s*(?:\d+[\).\s]+)?([A-Za-z][\w .\-/]*?)\s{2,}(\d{1,4})\s*$', line)
+        if not m:
+            continue
+        name, cap = m.group(1).strip(), int(m.group(2))
+        if name.upper() in _ROOM_SKIP or not (0 < cap <= 2000):
+            continue
+        rooms.append({'room': name, 'capacity': cap})
     return rooms
 
 # ---------------- assemble ----------------
@@ -219,6 +244,14 @@ def _level_sig(code):
     if len(p) >= 2:
         p[-2] = 'L'
     return '/'.join(p)
+
+def extract_series(text):
+    """Assessment series taken from the documents, e.g. 'JULY/AUGUST 2026' -> 'July/August 2026'."""
+    m = re.search(r'([A-Z][A-Za-z]+/[A-Z][A-Za-z]+\s+\d{4})', text)
+    if m:
+        return re.sub(r'\s+', ' ', m.group(1)).title()
+    m = re.search(r'([A-Z][a-z]+\s+\d{4})', text)
+    return m.group(1) if m else ''
 
 def build_data(reg_texts, tt_bytes: bytes, rooms):
     """reg_texts: extracted register text(s). tt_bytes: master-timetable PDF bytes
@@ -285,5 +318,6 @@ def build_data(reg_texts, tt_bytes: bytes, rooms):
                       'time': m['time'], 'cycle': m.get('cycle', '')}
                      if m.get('date') else None),
         })
+    series = extract_series(reg_texts[0]) if reg_texts else ''
     return {'centre': centre or 'Assessment Centre', 'centre_code': ccode,
-            'units': out, 'rooms': rooms}
+            'series': series, 'units': out, 'rooms': rooms}

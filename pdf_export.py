@@ -9,6 +9,7 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.platypus import (SimpleDocTemplate, Table, TableStyle, Paragraph,
                                 Spacer, KeepTogether)
 from timetable_html import enrich_sessions
+from ui import fmt_time_range, fmt_duration
 
 INK = colors.HexColor('#16211d')
 ACCENT = colors.HexColor('#0d5b48')
@@ -22,19 +23,21 @@ def _styles():
     ss = getSampleStyleSheet()
     return {
         'centre': ParagraphStyle('centre', parent=ss['Title'], fontName='Times-Bold',
-                                 fontSize=17, textColor=INK, spaceAfter=2, leading=20),
-        'sub': ParagraphStyle('sub', fontName='Helvetica', fontSize=9, textColor=MUTED,
-                              spaceAfter=1),
-        'sess': ParagraphStyle('sess', fontName='Helvetica-Bold', fontSize=10.5,
-                               textColor=ACCENT, spaceBefore=12, spaceAfter=4),
-        'cell': ParagraphStyle('cell', fontName='Helvetica', fontSize=8.5, textColor=INK,
+                                 fontSize=22, textColor=INK, spaceAfter=3, leading=25),
+        'sub': ParagraphStyle('sub', fontName='Helvetica', fontSize=11, textColor=MUTED,
+                              spaceAfter=1, leading=14),
+        'sess': ParagraphStyle('sess', fontName='Helvetica-Bold', fontSize=13,
+                               textColor=ACCENT, spaceBefore=15, spaceAfter=5, leading=15),
+        'cell': ParagraphStyle('cell', fontName='Helvetica', fontSize=10, textColor=INK,
+                               leading=12.5),
+        'code': ParagraphStyle('code', fontName='Courier', fontSize=8, textColor=INK,
                                leading=10.5),
-        'code': ParagraphStyle('code', fontName='Courier', fontSize=7, textColor=INK,
-                               leading=9),
-        'room': ParagraphStyle('room', fontName='Courier', fontSize=8, textColor=INK,
-                               leading=10.5),
-        'roomsplit': ParagraphStyle('roomsplit', fontName='Courier', fontSize=8,
-                                    textColor=WARN, leading=10.5),
+        'room': ParagraphStyle('room', fontName='Courier', fontSize=9.3, textColor=INK,
+                               leading=12),
+        'roomsplit': ParagraphStyle('roomsplit', fontName='Courier', fontSize=9.3,
+                                    textColor=WARN, leading=12),
+        'th': ParagraphStyle('th', fontName='Helvetica-Bold', fontSize=9.5, textColor=INK,
+                             leading=12),
     }
 
 
@@ -48,23 +51,26 @@ def build_pdf(data):
     n_units = sum(len(s['rows']) for s in sessions)
     n_stud = sum(s['students'] for s in sessions)
 
+    series = data.get('series') or ''
+    subtitle = ('Written Assessment Timetable'
+                + (f' &nbsp;·&nbsp; {series} Assessment Series' if series else ''))
     flow = [Paragraph(data.get('centre', 'Assessment Centre'), S['centre']),
-            Paragraph('Written Assessment Timetable &nbsp;·&nbsp; July / August 2026', S['sub']),
+            Paragraph(subtitle, S['sub']),
             Paragraph(f"Centre code {data.get('centre_code','')} &nbsp;·&nbsp; {n_units} units "
                       f"&nbsp;·&nbsp; {n_stud} candidates &nbsp;·&nbsp; {len(sessions)} sessions",
                       S['sub']),
-            Spacer(1, 4)]
+            Spacer(1, 6)]
 
-    # column widths (landscape A4 usable ~ 273mm)
-    W = [22 * mm, 38 * mm, 38 * mm, 64 * mm, 15 * mm, 15 * mm, 14 * mm, 67 * mm]
+    # column widths (landscape A4 usable ~ 273mm); fills the full width
+    W = [24 * mm, 39 * mm, 42 * mm, 64 * mm, 16 * mm, 21 * mm, 16 * mm, 51 * mm]
     header = ['Curriculum Cycle', 'Course', 'Unit Code', 'Unit Name', 'Level',
               'Duration', 'Cand.', 'Room']
 
     for s in sessions:
         title = (f"{s['day']} {s['date']} &nbsp;·&nbsp; Session {s['session']} "
-                 f"&nbsp;·&nbsp; {s['time']} &nbsp;&nbsp;<font color='#5b6b64'>"
+                 f"&nbsp;·&nbsp; {fmt_time_range(s['time'])} &nbsp;&nbsp;<font color='#5b6b64'>"
                  f"{s['students']} candidates, {s['rooms']} rooms</font>")
-        rows = [[Paragraph(c, S['cell']) for c in header]]
+        rows = [[Paragraph(c, S['th']) for c in header]]
         for r in s['rows']:
             split = ',' in r['room']
             rows.append([
@@ -73,21 +79,21 @@ def build_pdf(data):
                 Paragraph(r['code'], S['code']),
                 Paragraph(r['name'] or '', S['cell']),
                 Paragraph(f"Level {r['level']}" if r['level'] else '—', S['cell']),
-                Paragraph(r.get('duration') or '—', S['cell']),
+                Paragraph(fmt_duration(r.get('duration')), S['cell']),
                 Paragraph(str(r['count']), S['cell']),
                 Paragraph(r['room'] or '—', S['roomsplit'] if split else S['room']),
             ])
         t = Table(rows, colWidths=W, repeatRows=1)
         t.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), TINT),
-            ('LINEBELOW', (0, 0), (-1, 0), 0.7, ACCENT),
-            ('LINEBELOW', (0, 1), (-1, -1), 0.35, RULE),
+            ('LINEBELOW', (0, 0), (-1, 0), 0.8, ACCENT),
+            ('LINEBELOW', (0, 1), (-1, -1), 0.4, RULE),
             ('ALIGN', (4, 0), (6, -1), 'CENTER'),
             ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-            ('TOPPADDING', (0, 0), (-1, -1), 3),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
-            ('LEFTPADDING', (0, 0), (-1, -1), 4),
-            ('RIGHTPADDING', (0, 0), (-1, -1), 4),
+            ('TOPPADDING', (0, 0), (-1, -1), 5),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+            ('LEFTPADDING', (0, 0), (-1, -1), 6),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 6),
         ]))
         flow.append(KeepTogether([Paragraph(title, S['sess']), t]))
 

@@ -1,10 +1,13 @@
-"""Build the mini-timetable Excel workbook: a Summary sheet + one sheet per day."""
+"""Build the mini-timetable Excel workbook: Summary + a filterable flat Timetable
++ one sheet per day. All flat tables have Excel auto-filters enabled."""
 import io
+from collections import defaultdict
 from datetime import datetime
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 from allocate import group_by_session, allocate_session
+from ui import fmt_time_range, fmt_duration
 
 HDR   = PatternFill('solid', fgColor='1F4E78')
 BANNER= PatternFill('solid', fgColor='2E75B6')
@@ -26,20 +29,47 @@ def build_workbook(data):
     # allocate every session
     alloc = {k: allocate_session(v, rooms) for k, v in sessions.items()}
 
+    series = data.get('series', '')
     wb = Workbook()
     # ---------------- Summary ----------------
     ws = wb.active; ws.title = 'Summary'
-    ws.append([f"MINI TIMETABLE — {data['centre']}  ({data['centre_code']})"])
+    title = f"MINI TIMETABLE — {data['centre']}  ({data['centre_code']})"
+    if series: title += f"   ·   {series} Assessment Series"
+    ws.append([title])
     ws['A1'].font = Font(bold=True, size=14)
     ws.append([]); ws.append(['Date','Session','Time','Units','Students','Rooms used','Unseated'])
     for c in ws[3]: c.font = WHITE; c.fill = HDR; c.alignment = CTR; c.border = BORDER
     for k in sorted(sessions, key=lambda x: (_month_order(x[0]), x[1])):
         d,s,t = k; used, unseated = alloc[k]
-        ws.append([d, f'S{s}', t, len(sessions[k]),
+        ws.append([d, f'S{s}', fmt_time_range(t), len(sessions[k]),
                    sum(u['count'] for u in sessions[k]), len(used),
                    sum(n for _,n in unseated)])
-    widths = [14,9,12,8,10,12,10]
+    widths = [16,9,14,8,10,12,10]
     for i,w in enumerate(widths,1): ws.column_dimensions[get_column_letter(i)].width = w
+    ws.auto_filter.ref = f"A3:G{ws.max_row}"
+    ws.freeze_panes = 'A4'
+
+    # ---------------- Timetable (flat, filterable) ----------------
+    wt = wb.create_sheet('Timetable')
+    cols = ['Date','Session','Time','Unit Code','Unit Name','Level','Duration','Students','Room(s)']
+    wt.append(cols)
+    for c in wt[1]: c.font = WHITE; c.fill = HDR; c.alignment = CTR; c.border = BORDER
+    for k in sorted(sessions, key=lambda x: (_month_order(x[0]), x[1])):
+        d,s,t = k; used, _ = alloc[k]
+        where = defaultdict(list)
+        for room in used:
+            for o in room['occupants']:
+                if room['room'] not in where[o['code']]:
+                    where[o['code']].append(room['room'])
+        for u in sorted(sessions[k], key=lambda x: -x['count']):
+            wt.append([d, s, fmt_time_range(t), u['code'], u['name'], u['level'],
+                       fmt_duration(u.get('duration')), u['count'],
+                       ', '.join(where[u['code']])])
+            for c in wt[wt.max_row]: c.border = BORDER; c.alignment = LEFT
+    for i,cw in enumerate([15,9,14,24,44,7,10,10,26],1):
+        wt.column_dimensions[get_column_letter(i)].width = cw
+    wt.auto_filter.ref = f"A1:I{wt.max_row}"
+    wt.freeze_panes = 'A2'
 
     # ---------------- One sheet per day ----------------
     by_day = {}
@@ -84,6 +114,8 @@ def build_workbook(data):
         for u in unassigned:
             ws.append([u['code'], u['name'], u['course'], u['level'], u['count']])
         for i,cw in enumerate([26,42,26,8,10],1): ws.column_dimensions[get_column_letter(i)].width = cw
+        ws.auto_filter.ref = f"A2:E{ws.max_row}"
+        ws.freeze_panes = 'A3'
 
     buf = io.BytesIO(); wb.save(buf); buf.seek(0)
     return buf
