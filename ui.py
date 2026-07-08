@@ -76,11 +76,11 @@ table.tt tbody tr:hover td{ background:#fafbfa; }
 [data-testid="stFileUploaderDropzone"]{ background:var(--card); border:1.5px dashed #c7d0cb;
   border-radius:12px; }
 
-/* download buttons: solid green, width fits the label */
-.stDownloadButton button{ background:var(--accent); color:#fff; border:none; border-radius:9px;
-  font-weight:600; padding:.55rem 1.2rem; white-space:nowrap; width:auto; }
-.stDownloadButton button:hover{ background:#0a4a3b; color:#fff; }
-.stDownloadButton button p{ white-space:nowrap; }
+/* download + action buttons: solid green, width fits the label */
+.stDownloadButton button, .stButton button{ background:var(--accent); color:#fff; border:none;
+  border-radius:9px; font-weight:600; padding:.55rem 1.2rem; white-space:nowrap; width:auto; }
+.stDownloadButton button:hover, .stButton button:hover{ background:#0a4a3b; color:#fff; }
+.stDownloadButton button p, .stButton button p{ white-space:nowrap; }
 
 /* main-area upload start screen */
 .start-head{ text-align:center; margin:2.4rem 0 .4rem; }

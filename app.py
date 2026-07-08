@@ -10,6 +10,7 @@ from parsing import pdf_bytes_to_text, classify_pdf, parse_rooms, build_data
 from allocate import group_by_session, allocate_session
 from excel_export import build_workbook
 from pdf_export import build_pdf
+from registers_zip import build_registers_zip, fmt_folder
 import ui
 
 # Sidebar starts hidden on the upload screen, appears once documents are parsed.
@@ -28,7 +29,7 @@ def _hash(blobs):
 def parse_uploads(files, _key):
     """files: tuple of (filename, bytes). Auto-classifies the PDFs; the room list
     comes from a .docx or a PDF (table of ROOM | CAPACITY)."""
-    reg_texts, tt_bytes, rooms_blob, rooms_name = [], None, None, ''
+    reg_texts, reg_blobs, tt_bytes, rooms_blob, rooms_name = [], [], None, None, ''
     for name, blob in files:
         if name.lower().endswith('.docx'):
             rooms_blob, rooms_name = blob, name
@@ -36,6 +37,7 @@ def parse_uploads(files, _key):
         kind = classify_pdf(pdf_bytes_to_text(blob))
         if kind == 'registers':
             reg_texts.append(pdf_bytes_to_text(blob))
+            reg_blobs.append((name, blob))          # keep raw PDF for the day-split ZIP
         elif kind == 'master':
             tt_bytes = blob
         elif rooms_blob is None:                    # 'rooms' or unclassified -> rooms
@@ -43,12 +45,20 @@ def parse_uploads(files, _key):
     rooms = parse_rooms(rooms_blob, rooms_name) if rooms_blob is not None else []
     status = (bool(reg_texts), tt_bytes is not None, bool(rooms), len(reg_texts))
     if not (reg_texts and tt_bytes is not None and rooms):
-        return None, status
-    return build_data(reg_texts, tt_bytes, rooms), status
+        return None, status, ()
+    return build_data(reg_texts, tt_bytes, rooms), status, tuple(reg_blobs)
 
 def mkey(k):
     try: return (datetime.datetime.strptime(k[0], '%d %b %Y'), k[1])
     except Exception: return (datetime.datetime.max, k[1])
+
+@st.cache_data(show_spinner="Packaging registers by day…")
+def registers_zip_bytes(reg_blobs, mapping):
+    """mapping: tuple of (code, folder, name). Cached on the register bytes and
+    the code→day mapping, so it rebuilds only when documents or assignments change."""
+    code_folder = {c: f for c, f, _ in mapping}
+    code_name = {c: n for c, _, n in mapping}
+    return build_registers_zip(list(reg_blobs), code_folder, code_name).getvalue()
 
 # ---------------- uploader (main screen until parsed, then sidebar) ----------------
 def uploader():
@@ -67,9 +77,9 @@ else:
         ups = uploader()
 
 files = tuple((f.name, f.getvalue()) for f in ups) if ups else ()
-base, status = (None, (False, False, False, 0))
+base, status, reg_blobs = (None, (False, False, False, 0), ())
 if files:
-    base, status = parse_uploads(files, _hash([b for _, b in files]))
+    base, status, reg_blobs = parse_uploads(files, _hash([b for _, b in files]))
 
 # Flip between the start screen (sidebar hidden) and the loaded view (sidebar shown).
 now_ready = base is not None
@@ -147,12 +157,28 @@ if overflow:
                f"add room capacity in the sidebar.")
 
 # ---------------- downloads (above the preview) ----------------
-b1, b2, _ = st.columns([1.6, 1.6, 3])
+b1, b2, b3, _ = st.columns([1.6, 1.6, 2, 1.8])
 b1.download_button("Download timetable (PDF)", data=build_pdf(data).getvalue(),
                    file_name="mini_timetable.pdf", mime="application/pdf")
 b2.download_button("Download Excel workbook", data=build_workbook(data).getvalue(),
                    file_name="mini_timetable.xlsx",
                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+# One button: it shows a spinner while building the ZIP, then becomes the download.
+if reg_blobs:
+    mapping = tuple(sorted(
+        (u['code'], fmt_folder(u['slot']['date']) if u.get('slot') else 'Unassigned', u['name'])
+        for u in data['units']))
+    slot = b3.empty()
+    if st.session_state.get('zip_sig') == mapping:
+        slot.download_button("Download Registers by Day",
+                             data=registers_zip_bytes(reg_blobs, mapping),
+                             file_name="attendance_registers_by_day.zip",
+                             mime="application/zip", key="dl_zip")
+    elif slot.button("Download Registers by Day", key="prep_zip"):
+        with slot, st.spinner("Preparing registers…"):
+            registers_zip_bytes(reg_blobs, mapping)     # build + cache
+        st.session_state['zip_sig'] = mapping
+        st.rerun()
 st.markdown("<br>", unsafe_allow_html=True)
 
 # ---------------- unmapped units ----------------
