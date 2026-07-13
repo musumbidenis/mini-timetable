@@ -60,7 +60,10 @@ def parse_registers(text: str):
     centre = re.sub(r':\s*[0-9]{5,}[A-Z]?', ' ', centre)
     centre = re.sub(r'\s+', ' ', centre).strip()
     units = {}
-    for b in text.split('Report Type: Assessment Registrations'):
+    # Split on BOTH first-attempt and re-assessment reports so each block is one
+    # unit; merge_registers then unions candidates per code (re-assessment
+    # candidates fold into the same unit as first-attempt ones).
+    for b in re.split(r'Report Type:\s*(?:Re[-\s]?)?Assessment Registrations', text):
         mc = re.search(r'UNIT CODE\s*:?\s*([A-Z0-9/]+)', b)
         if not mc or not CODE.fullmatch(mc.group(1).strip()):
             continue
@@ -314,10 +317,14 @@ def build_data(reg_texts, tt_bytes: bytes, rooms):
             'duration': m.get('duration', ''),
             'count': n,
             'matched': matched,
+            # signature of the exact master-timetable row this unit matched, so the
+            # Excel can fill that row's Candidates/Room and leave unmatched rows blank
+            'msig': ((m['code'], m['level'], m['date'], m['session'], m['time'])
+                     if m.get('date') else None),
             'slot': ({'date': m['date'], 'day': m['day'], 'session': m['session'],
                       'time': m['time'], 'cycle': m.get('cycle', '')}
                      if m.get('date') else None),
         })
     series = extract_series(reg_texts[0]) if reg_texts else ''
     return {'centre': centre or 'Assessment Centre', 'centre_code': ccode,
-            'series': series, 'units': out, 'rooms': rooms}
+            'series': series, 'units': out, 'rooms': rooms, 'master': master}
