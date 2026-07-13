@@ -54,11 +54,13 @@ def mkey(k):
 
 @st.cache_data(show_spinner="Packaging registers by day…")
 def registers_zip_bytes(reg_blobs, mapping):
-    """mapping: tuple of (code, folder, name). Cached on the register bytes and
-    the code→day mapping, so it rebuilds only when documents or assignments change."""
-    code_folder = {c: f for c, f, _ in mapping}
-    code_name = {c: n for c, _, n in mapping}
-    return build_registers_zip(list(reg_blobs), code_folder, code_name).getvalue()
+    """mapping: tuple of (code, folder, name, session). Cached on the register
+    bytes and the code→day/session mapping, so it rebuilds only when documents
+    or assignments change."""
+    code_folder = {c: f for c, f, _, _ in mapping}
+    code_name = {c: n for c, _, n, _ in mapping}
+    code_session = {c: s for c, _, _, s in mapping}
+    return build_registers_zip(list(reg_blobs), code_folder, code_name, code_session).getvalue()
 
 # ---------------- uploader (main screen until parsed, then sidebar) ----------------
 def uploader():
@@ -166,7 +168,8 @@ b2.download_button("Download Excel workbook", data=build_workbook(data).getvalue
 # One button: it shows a spinner while building the ZIP, then becomes the download.
 if reg_blobs:
     mapping = tuple(sorted(
-        (u['code'], fmt_folder(u['slot']['date']) if u.get('slot') else 'Unassigned', u['name'])
+        (u['code'], fmt_folder(u['slot']['date']) if u.get('slot') else 'Unassigned',
+         u['name'], (u['slot'] or {}).get('session', ''))
         for u in data['units']))
     slot = b3.empty()
     if st.session_state.get('zip_sig') == mapping:

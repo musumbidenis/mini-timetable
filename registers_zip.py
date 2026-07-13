@@ -12,6 +12,7 @@ import pypdf
 from parsing import pdf_bytes_to_text
 
 CODELINE = re.compile(r'UNIT CODE\s*:?\s*([A-Z]{2,}(?:/[A-Z0-9]+){4,})')
+SESSION_LABEL = {'1': 'Morning', '2': 'Mid-morning'}
 
 
 def fmt_folder(date_str):
@@ -52,10 +53,12 @@ def _file_groups(blob, valid):
     return reader, groups
 
 
-def build_registers_zip(reg_files, code_folder, code_name):
-    """reg_files: list of (filename, pdf_bytes). code_folder/code_name: code -> str.
-    A unit's pages are merged across all register files into one PDF, filed under
-    its assessment-day folder. Returns a BytesIO ZIP."""
+def build_registers_zip(reg_files, code_folder, code_name, code_session=None):
+    """reg_files: list of (filename, pdf_bytes). code_folder/code_name/code_session:
+    code -> str. A unit's pages are merged across all register files into one PDF,
+    filed under its assessment-day folder and tagged with its session (S1/S2).
+    Returns a BytesIO ZIP."""
+    code_session = code_session or {}
     valid = set(code_folder)                          # known unit codes from the timetable
     parts = {}                                        # code -> [(reader, [idx]), ...]
     for _, blob in reg_files:
@@ -70,6 +73,9 @@ def build_registers_zip(reg_files, code_folder, code_name):
             base = _safe(code.replace('/', '_'))
             if code_name.get(code):
                 base += f" - {_safe(code_name[code])}"
+            label = SESSION_LABEL.get(code_session.get(code, ''), '')
+            if label:                                 # tag with session for easy ID
+                base = f"{label} - {base}"
             path, k = f"{folder}/{base}.pdf", 1
             while path in used:
                 k += 1
@@ -95,8 +101,9 @@ if __name__ == '__main__':
     cf = {u['code']: (fmt_folder(u['slot']['date']) if u.get('slot') else 'Unassigned')
           for u in data['units']}
     cn = {u['code']: u['name'] for u in data['units']}
+    cs = {u['code']: (u['slot'] or {}).get('session', '') for u in data['units']}
     t0 = time.time()
-    zbytes = build_registers_zip(regs, cf, cn).getvalue()
+    zbytes = build_registers_zip(regs, cf, cn, cs).getvalue()
     print(f"built {len(zbytes)//1024} KB in {time.time()-t0:.1f}s")
     z = zf.ZipFile(io.BytesIO(zbytes))
     folders = sorted({n.split('/')[0] for n in z.namelist()})
